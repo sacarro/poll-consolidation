@@ -1,0 +1,13 @@
+{
+    "name": "poll-consolidation",
+    "version": "0.0.1",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/sacarro/poll-consolidation.git"
+    },
+    "config": {
+    },
+    "devDependencies": {
+        "mocha": "^2.2.1"
+    }
+}
