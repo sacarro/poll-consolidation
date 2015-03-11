@@ -1,5 +1,7 @@
 var EventEmitter = require("events").EventEmitter;
 var util = require("util");
+var http = require("http");
+var async = require("async");
 
 function Consolidator() {
 
@@ -57,7 +59,7 @@ Consolidator.prototype._createNode = function(name, path, parent) {
     return newNode;
 };
 
-Consolidator.prototype._ensureTree = function(pathParts, fullPath, parentNode) {
+Consolidator.prototype._ensureTree = function(pathParts, fullPath, rate, parentNode) {
     var path = pathParts.shift();
     var nFullPath = fullPath.substr(fullPath.indexOf("/"));
     if (!parentNode) {
@@ -71,10 +73,11 @@ Consolidator.prototype._ensureTree = function(pathParts, fullPath, parentNode) {
 
     if (!pathParts.length) {
         node.emit = true;
-        node.poll = true;
+        node.rate = rate;
+        this._addPolling(node);
         return node;
     } else {
-        return this._ensureTree(pathParts, fullPath.substr(fullPath.indexOf("/")), node);
+        return this._ensureTree(pathParts, fullPath.substr(fullPath.indexOf("/")), rate, node);
     }
 };
 
@@ -91,9 +94,18 @@ Consolidator.prototype._stopAllPolling = function(node) {
 
 };
 
+Consolidator.prototype._addPolling = function(node) {
+    node.poll = true;
+    var idx = this.pollTargets.indexOf(node.path);
+    if (idx === -1) {
+        this.pollTargets.push(node.path);
+        this._pollTarget(node.path, node.rate);
+    }
+};
+
 Consolidator.prototype._consolidate = function(node) {
 
-    var getConsolidatorNode = function(node) {
+    var getConsolidatorNode = function getConsolidatorNode(node) {
 
         if (!node) {
             return null;
@@ -107,7 +119,16 @@ Consolidator.prototype._consolidate = function(node) {
 
         var pCPoint = getConsolidatorNode(node.parent);
         if (pCPoint) {
+            // Math.min produces NaN when passed an undefined variable
+            if (node.rate === undefined) {
+                minRate = pCPoint.rate;
+            } else if (pCPoint.rate === undefined) {
+                minRate = node.rate;
+            } else {
+                minRate = Math.min(node.rate, pCPoint.rate);
+            }
             cPoint = pCPoint;
+            cPoint.rate = minRate;
         }
 
         return cPoint;
@@ -122,18 +143,72 @@ Consolidator.prototype._consolidate = function(node) {
         for (var cId in consolidationNode.children) {
             this._stopAllPolling(consolidationNode.children[cId]);
         }
-        consolidationNode.poll = true;
+        this._addPolling(consolidationNode);
     }
+
+    return consolidationNode;
 
 };
 
-Consolidator.prototype.poll = function(target, rateOverride) {
+Consolidator.prototype._pollTarget = function(target, rate) {
+
+    var callback = function pollDataReceived(err, data) {
+        if (err) {
+            this.emit("error", err);
+        } else {
+            this.emit("data", data);
+        }
+    }.bind(this);
+
+    console.log("POLLING", target);
+    var req = http.request({
+        method: "GET",
+        host: this.host,
+        path: target
+    }, function(res) {
+        var body = "";
+        res.on("data", function responseDataReceived(data) {
+            body += data;
+        });
+        res.on("end", function responseComplete() {
+            // Only pass up the data and poll again if target still alive 
+            if (this.pollTargets.indexOf(target) > -1) {
+                if (res.statusCode !== 200) {
+                    callback(res);
+                } else {
+                    callback(null, {
+                        origin: target,
+                        data: body
+                    });
+                }
+
+                // Ok
+                setTimeout(function repoll() {
+                    if (this && this._pollTarget) {
+                        this._pollTarget(target, rate);
+                    }
+                }.bind(this), rate);
+            }
+        }.bind(this));
+    }.bind(this));
+
+    req.on("error", function requestError(err) {
+        callback(err);
+    });
+    req.end();
+};
+
+Consolidator.prototype.poll = function(target, rate) {
+
+    var pathParts = target.split("/");
+    pathParts.shift(); // split inserts a '' at the beginning of the array
 
     // Make sure all the pieces of the path are in the tree
-    var node = this._ensureTree(target.split("/"), target);
+    var node = this._ensureTree(pathParts, target, rate || 500);
 
     // Now walk back up the tree to see what can be consolidated
     this._consolidate(node);
+
 };
 
 module.exports.Consolidator = Consolidator;

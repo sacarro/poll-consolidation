@@ -1,13 +1,16 @@
 {
-    "name": "poll-consolidation",
-    "version": "0.0.1",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/sacarro/poll-consolidation.git"
-    },
-    "config": {
-    },
-    "devDependencies": {
-        "mocha": "^2.2.1"
-    }
+  "name": "poll-consolidation",
+  "version": "0.0.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sacarro/poll-consolidation.git"
+  },
+  "config": {},
+  "scripts": {
+    "test": "istanbul cover _mocha -- -R spec test/tests.js"
+  },
+  "devDependencies": {
+    "mocha": "^2.2.1",
+    "sinon": "^1.13.0"
+  }
 }
