@@ -1,7 +1,6 @@
 var EventEmitter = require("events").EventEmitter;
 var util = require("util");
 var http = require("http");
-var async = require("async");
 
 function Consolidator() {
 

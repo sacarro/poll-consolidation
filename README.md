@@ -3,6 +3,6 @@
 ### To Test:
 
 `````````
-npm install
+sudo npm install
 npm test
 ````````
