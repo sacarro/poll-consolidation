@@ -98,7 +98,7 @@ Consolidator.prototype._addPolling = function(node) {
     var idx = this.pollTargets.indexOf(node.path);
     if (idx === -1) {
         this.pollTargets.push(node.path);
-        this._pollTarget(node.path, node.rate);
+        this._pollTarget(node);
     }
 };
 
@@ -117,7 +117,8 @@ Consolidator.prototype._consolidate = function(node) {
         }
 
         var pCPoint = getConsolidatorNode(node.parent);
-        if (pCPoint) {
+        // If we have the point and the point is not the root node (id'd by the lack of a parent)
+        if (pCPoint && pCPoint.parent) {
             // Math.min produces NaN when passed an undefined variable
             if (node.rate === undefined) {
                 minRate = pCPoint.rate;
@@ -149,44 +150,100 @@ Consolidator.prototype._consolidate = function(node) {
 
 };
 
-Consolidator.prototype._pollTarget = function(target, rate) {
+Consolidator.prototype._emitForEach = function(evt){
 
-    var callback = function pollDataReceived(err, data) {
+    if(evt.origin){
+        var pathParts = evt.origin.split("/");
+        pathParts.shift();
+        var node = this.root;
+        var currentData = evt.data;
+        // Walk the tree
+        for(var i = 0; i < pathParts.length; i++){
+            node = node.children[pathParts[i]];
+            if(!node){
+                break;
+            }
+        }
+
+        if(node){
+            var emitForChildren = function(data, children){
+                for(var p in data){
+                    if(children[p]){
+                        if(children[p].emit){
+                            this.emit("data", {
+                                origin: children[p].path,
+                                source: evt.origin,
+                                data: data[p]
+                            });
+
+                            if(typeof data[p] === "object" || Array.isArray(data[p])){
+                                emitForChildren(data[p], children[p].children);
+                            }
+                        }
+                    }
+                }
+            }.bind(this);
+
+            if(node.emit){
+                this.emit("data", evt);
+            }
+            emitForChildren(evt.data, node.children);
+        }else{
+            console.warn("Could not find in tree", evt.origin);
+        }
+    }else{
+        console.warn("Received data from unknown origin");
+    }
+};
+
+Consolidator.prototype._pollTarget = function(node) {
+
+    var callback = function pollDataReceived(err, evt) {
         if (err) {
             this.emit("error", err);
         } else {
-            this.emit("data", data);
+            this._emitForEach(evt);
         }
     }.bind(this);
 
-    console.log("POLLING", target);
     var req = http.request({
         method: "GET",
-        host: this.host,
-        path: target
+        host: this.host, // FIXME: This isn't implemented
+        path: node.path
     }, function(res) {
         var body = "";
+        var contentType = res.headers["content-type"];
         res.on("data", function responseDataReceived(data) {
             body += data;
         });
         res.on("end", function responseComplete() {
             // Only pass up the data and poll again if target still alive 
-            if (this.pollTargets.indexOf(target) > -1) {
-                if (res.statusCode !== 200) {
-                    callback(res);
-                } else {
-                    callback(null, {
-                        origin: target,
-                        data: body
-                    });
-                }
-
-                // Ok
-                setTimeout(function repoll() {
-                    if (this && this._pollTarget) {
-                        this._pollTarget(target, rate);
+            if (!contentType || contentType.toLowerCase().indexOf("json") > -1){
+                if( this.pollTargets.indexOf(node.path) > -1) {
+                    var jBody;
+                    try{
+                        jBody = JSON.parse(body);
+                    }catch(e){
                     }
-                }.bind(this), rate);
+
+                    if (res.statusCode !== 200 || !jBody) {
+                        callback(res);
+                    } else {
+                        callback(null, {
+                            origin: node.path,
+                            data: jBody
+                        });
+                    }
+
+                    // Repoll
+                    setTimeout(function repoll() {
+                        if (this && this._pollTarget) {
+                            this._pollTarget(node);
+                        }
+                    }.bind(this), node.rate);
+                }
+            }else{
+                callback("Invalid content type");
             }
         }.bind(this));
     }.bind(this));

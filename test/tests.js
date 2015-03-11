@@ -116,29 +116,14 @@ describe("_consolidate", function() {
 describe("poll", function() {
 
 
-    var consolidator, dataCallback, errCallback, responseObj, requestObj;
-    
+    var consolidator, dataCallback, errCallback, requestObj;
+
+    var getData;
     // Stub out the request method.
     beforeEach(function(done) {
         dataCallback = null;
         errCalback = null;
         consolidator = new Consolidator();
-        responseObj = {
-            statusCode: 200,
-            on: function(event, callback) {
-                if (event === "end") {
-                    if (dataCallback) {
-                        dataCallback(JSON.stringify({
-                            ok: 1
-                        }));
-                    }
-                    callback();
-                } else if (event === "data") {
-                    dataCallback = callback;
-                }
-            }
-        };
-
         requestObj = {
             on: function(evt, callback) {
                 if (evt === "error") {
@@ -147,8 +132,36 @@ describe("poll", function() {
             },
             end: function() {}
         };
-        sinon.stub(http, "request").yields(responseObj).
-        returns(requestObj);
+
+        sinon.stub(http, "request", function(params, callback){
+            setImmediate(function(){
+                var responseObj = {
+                    statusCode: 200,
+                    params : params,
+                    headers: {
+                        "content-type": "text/json"
+                    },
+                    on: function(event, callback) {
+                        if (event === "end") {
+                            if (dataCallback) {
+                                var responseData = getData ? getData(params) : "{}";
+                                if(!responseData){
+                                    responseObj.statusCode = 500;
+                                }
+                                dataCallback(responseData);
+                            }
+                            callback();
+                        } else if (event === "data") {
+                            dataCallback = callback;
+                        }
+                    }
+                };
+
+                callback(responseObj); 
+            });
+            return requestObj;
+        });
+
         done();
     });
 
@@ -168,49 +181,144 @@ describe("poll", function() {
             }
         });
 
-        consolidator.poll(target);
+        consolidator.poll(target, 5000);
 
     });
 
     it("should poll multiple targets", function(done) {
 
-        var targets = ["/foo/bar", "/foo/bar/0", "/foo/bar/1", "/moo/woof"];
+        var targets = {
+            "/foo/bar": ["test","ing"],
+            "/foo/bar/0": "test",
+            "/foo/bar/1": "ing",
+            "/moo/woof":{
+                "test": 1,
+                "ing" : 2
+            }
+        };
+
+        getData = function(params){
+            if(targets[params.path]){
+                return JSON.stringify(targets[params.path]);
+            }else{
+                return null;
+            }
+        };
+
         consolidator.on("error", function(data) {
             assert(1 === 2); // Should never error.
-            done();
+                done();
         });
 
         var hasDone = false;
         consolidator.on("data", function(data) {
 
-            var idx = targets.indexOf(data.origin);
-            if (idx > -1) {
-                targets.splice(idx, 1);
-            }
+            delete targets[data.origin];
 
             // no asserts becuase we will timeout if we don't get a response for all the targets
-            if (!targets.length && !hasDone) {
+            if (!Object.keys(targets).length && !hasDone) {
                 done();
                 hasDone = true;
             }
 
         });
 
-        targets.forEach(function(target) {
+        Object.keys(targets).forEach(function(target) {
             setImmediate(function() {
-                consolidator.poll(target, 1500);
+                consolidator.poll(target, 2);
             });
         });
 
     });
-    it("should error", function(done) {
+
+    it("polls with large hierarchy", function(done){
+
+
+        var targets = {
+            "/foo/baz/bar": ["test","ing"],
+            "/foo/baz/bar/0": "test",
+            "/foo/baz/bar/1": "ing",
+            "/foo/baz":{
+                bar : ["test","ing"]
+            }
+        };
+
+        getData = function(params){
+            if(targets[params.path]){
+                return JSON.stringify(targets[params.path]);
+            }else{
+                return null;
+            }
+        };
+
+        consolidator.on("error", function(data) {
+            assert(1 === 2); // Should never error.
+                done();
+        });
+
+        var hasDone = false;
+        consolidator.on("data", function(data) {
+
+            delete targets[data.origin];
+
+            // no asserts becuase we will timeout if we don't get a response for all the targets
+            if (!Object.keys(targets).length && !hasDone) {
+                done();
+                hasDone = true;
+            }
+
+        });
+
+        Object.keys(targets).forEach(function(target) {
+            setImmediate(function() {
+                consolidator.poll(target, 2);
+            });
+        });
+
+
+
+    });
+
+    it("produce request error", function(done) {
 
         // Force an error with the request object.
         requestObj.end = function() {
             errCallback("Forced an error");
         };
 
-        var target = "/foo/bar/0";
+        var target = "/nowhere";
+        consolidator.on("error", function(data) {
+            done();
+        });
+
+        consolidator.poll(target);
+    });
+
+    it("produce 500 status code error", function(done) {
+
+        // Null forces a status code of 500
+        getData = function(){
+            return null;
+        };
+
+
+        var target = "/nowhere";
+        consolidator.on("error", function(data) {
+            done();
+        });
+
+        consolidator.poll(target);
+    });
+
+    it("produces bad json", function(done) {
+
+        // Null forces a status code of 500
+        getData = function(){
+            return "fo{'";
+        };
+
+
+        var target = "/nowhere";
         consolidator.on("error", function(data) {
             done();
         });
@@ -221,15 +329,16 @@ describe("poll", function() {
     afterEach(function() {
         http.request.restore();
         consolidator = null;
+        getData = null;
     });
 });
 
 /*
- console.log(JSON.stringify(consolidator.root, function(key, value) {
-    if (key === "parent") {
-        return "[circular]";
-    } else {
-        return value;
-    }
-}, "\t"));
-*/
+   console.log(JSON.stringify(consolidator.root, function(key, value) {
+   if (key === "parent") {
+   return "[circular]";
+   } else {
+   return value;
+   }
+   }, "\t"));
+   */
