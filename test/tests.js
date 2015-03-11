@@ -181,9 +181,10 @@ describe("poll", function() {
             }
         });
 
-        consolidator.poll(target, 5000);
+        consolidator.poll(target, 0);
 
     });
+
 
     it("should poll multiple targets", function(done) {
 
@@ -225,7 +226,7 @@ describe("poll", function() {
 
         Object.keys(targets).forEach(function(target) {
             setImmediate(function() {
-                consolidator.poll(target, 2);
+                consolidator.poll(target, 0);
             });
         });
 
@@ -271,11 +272,9 @@ describe("poll", function() {
 
         Object.keys(targets).forEach(function(target) {
             setImmediate(function() {
-                consolidator.poll(target, 2);
+                consolidator.poll(target, 0);
             });
         });
-
-
 
     });
 
@@ -291,7 +290,7 @@ describe("poll", function() {
             done();
         });
 
-        consolidator.poll(target);
+        consolidator.poll(target, 0);
     });
 
     it("produce 500 status code error", function(done) {
@@ -307,7 +306,7 @@ describe("poll", function() {
             done();
         });
 
-        consolidator.poll(target);
+        consolidator.poll(target, 0);
     });
 
     it("produces bad json", function(done) {
@@ -323,12 +322,11 @@ describe("poll", function() {
             done();
         });
 
-        consolidator.poll(target);
+        consolidator.poll(target, 0);
     });
 
     afterEach(function() {
         http.request.restore();
-        consolidator = null;
         getData = null;
     });
 });

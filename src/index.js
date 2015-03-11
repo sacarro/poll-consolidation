@@ -236,11 +236,13 @@ Consolidator.prototype._pollTarget = function(node) {
                     }
 
                     // Repoll
-                    setTimeout(function repoll() {
-                        if (this && this._pollTarget) {
-                            this._pollTarget(node);
-                        }
-                    }.bind(this), node.rate);
+                    if(node.rate){
+                        setTimeout(function repoll() {
+                            if (this && this._pollTarget) {
+                                this._pollTarget(node);
+                            }
+                        }.bind(this), node.rate);
+                    }
                 }
             }else{
                 callback("Invalid content type");
